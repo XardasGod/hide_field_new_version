@@ -1,0 +1,41 @@
+{
+    "widget": {
+        "version": "1.0.0",
+        "interface_version": 2,
+        "init_once": true,
+        "installation": true,
+        "support": {
+            "link": "https://rocketsales.ru",
+            "email": "support@rocketsals.ru"
+        },
+        "locale": [
+            "ru"
+        ],
+        "name": "widget.name",
+        "description": "widget.description",
+        "short_description": "widget.short_description"
+    },
+    "locations": [
+        "lcard-0",
+        "ccard-0",
+        "settings"
+    ],
+    "tour": {
+        "is_tour": true,
+        "tour_images": {
+            "ru": [
+                "/images/tour/ru/tour_1.png",
+                "/images/tour/ru/tour_2.png",
+                "/images/tour/ru/tour_3.png"
+            ]
+        },
+        "tour_description": "tour.tour_description"
+    },
+    "settings": {
+        "fieldsConfig": {
+            "name": "fieldsConfig",
+            "type": "custom",
+            "required": false
+        }
+    }
+}

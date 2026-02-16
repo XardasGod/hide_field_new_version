@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "widget": "ts-node ./scripts/prod.ts",
+    "widget:dev": "ts-node ./scripts/dev.ts"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "vue": "^3.2.26",
+    "ant-design-vue": "^4.2.6"
+  },
+  "devDependencies": {
+    "@vue/cli-service": "^5.0.8",
+    "amo-widget-builder": "^0.0.10",
+    "dotenv": "^10.0.0",
+    "terser-webpack-plugin": "^5.3.10",
+    "ts-node": "^10.4.0",
+    "typescript": "^4.5.3",
+    "vue-template-compiler": "^2.6.14"
+  }
+}
