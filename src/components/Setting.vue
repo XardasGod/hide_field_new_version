@@ -187,6 +187,8 @@ export default defineComponent({
             }, {})
         } catch (error) {
         }
+
+        await this.loadPipelinesAndStages()
     },
     methods: {
         normalizeNumericIds(values) {
