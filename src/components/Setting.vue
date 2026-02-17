@@ -41,113 +41,229 @@
             </div>
         </div>
         <div v-if="fieldConfig.name" style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">
-            <p>Выберите воронку в которой хотите скрыть поля:</p>
-            <a-select  class="select_width" v-model:value="fieldConfig.pipelines" :options="pipelineOptions" optionFilterProp="label" mode="multiple"
-                        showSearch></a-select>
+            <template v-if="selectedPipelineOptions.length">
+                <p>Выберите этапы по воронкам, в которых хотите скрыть поле:</p>
+                <div class="stages_group" v-for="pipeline in selectedPipelineOptions" :key="pipeline.value">
+                    <span class="stages_title">{{ pipeline.label }}</span>
+                    <select
+                        class="stage_native_select"
+                        multiple
+                        :value="getPipelineStages(pipeline.value).map(String)"
+                        @change="onNativeStagesChange(pipeline.value, $event)"
+                    >
+                        <option
+                            v-for="stage in getStageOptionsForPipeline(pipeline.value)"
+                            :key="stage.value"
+                            :value="String(stage.value)"
+                        >
+                            {{ stage.label }}
+                        </option>
+                    </select>
+                </div>
+            </template>
 
-             <p>Выберите менеджеро для которых хотите скрыть поля:</p>
-             <a-select class="select_width" v-model:value="fieldConfig.managers" :options="userOptions" mode="multiple"
-                    optionFilterProp="label" showSearch>
-                    <template #option="{ label, avatar }">
-                        <a-avatar :src="avatar" :size="20" style="margin-right: 5px" />
-                        {{ label }}
-                    </template>
-                </a-select>
+            <p>Выберите менеджеро для которых хотите скрыть поля:</p>
+            <a-select class="select_width" v-model:value="fieldConfig.managers" :options="userOptions" mode="multiple"
+                optionFilterProp="label" showSearch>
+                <template #option="{ label, avatar }">
+                    <a-avatar :src="avatar" :size="20" style="margin-right: 5px" />
+                    {{ label }}
+                </template>
+            </a-select>
 
         </div>
     </div>
 </template>
 
 <script>
-import { defineComponent } from 'vue';
+import { defineComponent } from 'vue'
 
 export default defineComponent({
     data() {
         return {
             isBold: false,
             color: null,
-            nameBuffer: "", //Переменная для поиска полей
+            nameBuffer: '',
             fieldConfig: {
                 pipelines: [],
+                stagesByPipeline: {},
                 managers: [],
-                name: "",
+                name: '',
             },
             pipelineOptions: [],
+            pipelineStageOptions: {},
             userOptions: (() => {
                 const managers = AMOCRM.constant('managers')
                 const managersArray = Object.values(managers)
                 return managersArray
-                    .filter(manager => manager.active === true) // Фильтруем активных пользователей
+                    .filter(manager => manager.active === true)
                     .map(manager => ({
                         label: manager.title,
                         avatar: manager.avatar,
                         value: Number(manager.id),
-                    }));
+                    }))
             })(),
 
             showDropdown: false,
             customFields: (() => {
-                const customFields = APP.constant('account').cf;
-                const customFieldsArray = Object.values(customFields);
-                return customFieldsArray.map(field => field.NAME);
+                const customFields = APP.constant('account').cf
+                const customFieldsArray = Object.values(customFields)
+                return customFieldsArray.map(field => field.NAME)
             })(),
             filteredCustomFieldsOptions: []
-        };
+        }
     },
     props: {
         input: null,
         selectedFields: []
     },
+    computed: {
+        selectedPipelineOptions() {
+            return this.pipelineOptions
+        }
+    },
     watch: {
         isBold: {
             handler() {
-                this.updateStyle();
+                this.updateStyle()
             },
         },
         color: {
             handler() {
-                this.updateStyle();
+                this.updateStyle()
             },
         },
         fieldConfig: {
             handler() {
-                this.$emit('output', this.fieldConfig);
+                this.$emit('output', this.fieldConfig)
             },
             deep: true
         }
     },
     async created() {
-        this.filteredCustomFieldsOptions = this.customFields;
+        this.filteredCustomFieldsOptions = this.customFields
         if (this.input.hasOwnProperty('name')) {
-            delete this.input.id;
-            this.fieldConfig = this.input;
-            this.nameBuffer = this.input.name;
+            delete this.input.id
+            this.fieldConfig = {
+                pipelines: this.normalizeNumericIds(this.input.pipelines),
+                stagesByPipeline: this.input.stagesByPipeline && typeof this.input.stagesByPipeline === 'object'
+                    ? Object.fromEntries(Object.entries(this.input.stagesByPipeline).map(([pipelineId, statuses]) => [
+                        Number(pipelineId),
+                        this.normalizeNumericIds(statuses)
+                    ]))
+                    : {},
+                managers: this.normalizeNumericIds(this.input.managers),
+                name: this.input.name || ''
+            }
+            this.nameBuffer = this.input.name
         }
-        try { //получение воронок и этапов
-            const response = await fetch(window.location.origin + '/api/v4/leads/pipelines');
-            const jsonResponse = await response.json();
-            this.pipelineOptions = jsonResponse._embedded.pipelines.map(pipeline => ({ //получаем и форматируем поля в удобном виде для a-select
-                label: pipeline.name,
-                value: Number(pipeline.id)
-            }));
-        } catch (error) {
-        }
+
+        await this.loadPipelinesAndStages()
+        this.syncPipelinesFromStages()
     },
     methods: {
+        normalizeNumericIds(values) {
+            return Array.isArray(values)
+                ? values.map(value => Number(value)).filter(value => Number.isFinite(value))
+                : []
+        },
+        syncPipelinesFromStages() {
+            const stageMap = this.fieldConfig.stagesByPipeline || {}
+            this.fieldConfig.pipelines = Object.keys(stageMap)
+                .map(id => Number(id))
+                .filter(id => Number.isFinite(id))
+        },
+        async loadPipelinesAndStages() {
+            try {
+                const response = await fetch(window.location.origin + '/api/v4/leads/pipelines')
+                if (!response.ok) {
+                    throw new Error('Не удалось получить список воронок')
+                }
+
+                const jsonResponse = await response.json()
+                const pipelines = jsonResponse?._embedded?.pipelines || []
+
+                this.pipelineOptions = pipelines.map(pipeline => ({
+                    label: pipeline.name,
+                    value: Number(pipeline.id)
+                }))
+
+                const stagesFromEmbedded = pipelines.reduce((acc, pipeline) => {
+                    const statuses = (pipeline._embedded?.statuses || []).map(status => ({
+                        label: status.name,
+                        value: Number(status.id)
+                    }))
+                    if (statuses.length) {
+                        acc[Number(pipeline.id)] = statuses
+                    }
+                    return acc
+                }, {})
+
+                this.pipelineStageOptions = stagesFromEmbedded
+
+                await Promise.all(this.pipelineOptions.map(async pipeline => {
+                    const pipelineId = Number(pipeline.value)
+                    if (Array.isArray(this.pipelineStageOptions[pipelineId]) && this.pipelineStageOptions[pipelineId].length) {
+                        return
+                    }
+
+                    try {
+                        const statusesResponse = await fetch(`${window.location.origin}/api/v4/leads/pipelines/${pipelineId}/statuses`)
+                        if (!statusesResponse.ok) {
+                            return
+                        }
+                        const statusesJson = await statusesResponse.json()
+                        const statuses = statusesJson?._embedded?.statuses || []
+                        this.pipelineStageOptions[pipelineId] = statuses.map(status => ({
+                            label: status.name,
+                            value: Number(status.id)
+                        }))
+                    } catch (error) {
+                    }
+                }))
+            } catch (error) {
+            }
+        },
         filterOptions($event) {
-            this.nameBuffer = $event.target.value;
-            const value = $event.target.value.toLowerCase();
+            this.nameBuffer = $event.target.value
+            const value = $event.target.value.toLowerCase()
             this.filteredCustomFieldsOptions = this.customFields
                 .filter(manager => manager.toLowerCase().includes(value))
-                .filter(field => !this.selectedFields.includes(field)); // Фильтруем уже выбранные поля
+                .filter(field => !this.selectedFields.includes(field))
         },
         selectOption(option) {
-            this.fieldConfig.name = option;
-            this.nameBuffer = option;
-            this.showDropdown = false;
+            this.fieldConfig.name = option
+            this.nameBuffer = option
+            this.showDropdown = false
         },
+        getStageOptionsForPipeline(pipelineId) {
+            return this.pipelineStageOptions?.[Number(pipelineId)] || []
+        },
+        onNativeStagesChange(pipelineId, $event) {
+            const values = Array.from($event.target.selectedOptions || []).map(option => option.value)
+            this.updatePipelineStages(pipelineId, values)
+        },
+        getPipelineStages(pipelineId) {
+            return this.fieldConfig.stagesByPipeline?.[Number(pipelineId)] || []
+        },
+        updatePipelineStages(pipelineId, statuses) {
+            const normalizedPipelineId = Number(pipelineId)
+            const normalizedStatuses = this.normalizeNumericIds(statuses)
+            const nextMap = {
+                ...(this.fieldConfig.stagesByPipeline || {})
+            }
+
+            if (normalizedStatuses.length) {
+                nextMap[normalizedPipelineId] = normalizedStatuses
+            } else {
+                delete nextMap[normalizedPipelineId]
+            }
+
+            this.fieldConfig.stagesByPipeline = nextMap
+            this.syncPipelinesFromStages()
+        }
     }
-});
+})
 </script>
 <style scoped>
 .dropdown {
@@ -203,7 +319,28 @@ export default defineComponent({
     border: none;
     background: transparent;
 }
+
 .select_width {
     width: 90%;
+}
+
+.stages_group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.stages_title {
+    font-weight: 600;
+}
+
+.stage_native_select {
+    width: 90%;
+    min-height: 110px;
+    border: 1px solid rgb(228, 231, 236);
+    border-radius: 6px;
+    padding: 6px;
+    background: #fff;
 }
 </style>
