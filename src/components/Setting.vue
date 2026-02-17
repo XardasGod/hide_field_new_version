@@ -112,7 +112,8 @@ export default defineComponent({
     },
     computed: {
         selectedPipelineOptions() {
-            return this.pipelineOptions.filter(option => this.fieldConfig.pipelines.includes(option.value))
+            const selectedIds = new Set(this.normalizeNumericIds(this.fieldConfig.pipelines))
+            return this.pipelineOptions.filter(option => selectedIds.has(Number(option.value)))
         }
     },
     watch: {
@@ -134,13 +135,13 @@ export default defineComponent({
         },
         'fieldConfig.pipelines': {
             handler(nextPipelines) {
-                const normalized = Array.isArray(nextPipelines) ? nextPipelines.map(Number) : []
+                const normalized = this.normalizeNumericIds(nextPipelines)
                 const currentMap = this.fieldConfig.stagesByPipeline || {}
                 const nextMap = {}
 
                 normalized.forEach(pipelineId => {
-                    const saved = currentMap[pipelineId] || []
-                    const validStatuses = (this.pipelineStageOptions[pipelineId] || []).map(option => Number(option.value))
+                    const saved = currentMap[Number(pipelineId)] || []
+                    const validStatuses = (this.pipelineStageOptions[Number(pipelineId)] || []).map(option => Number(option.value))
                     nextMap[pipelineId] = saved
                         .map(Number)
                         .filter(statusId => validStatuses.includes(statusId))
@@ -156,14 +157,14 @@ export default defineComponent({
         if (this.input.hasOwnProperty('name')) {
             delete this.input.id
             this.fieldConfig = {
-                pipelines: Array.isArray(this.input.pipelines) ? this.input.pipelines.map(Number) : [],
+                pipelines: this.normalizeNumericIds(this.input.pipelines),
                 stagesByPipeline: this.input.stagesByPipeline && typeof this.input.stagesByPipeline === 'object'
                     ? Object.fromEntries(Object.entries(this.input.stagesByPipeline).map(([pipelineId, statuses]) => [
                         Number(pipelineId),
-                        Array.isArray(statuses) ? statuses.map(Number) : []
+                        this.normalizeNumericIds(statuses)
                     ]))
                     : {},
-                managers: Array.isArray(this.input.managers) ? this.input.managers.map(Number) : [],
+                managers: this.normalizeNumericIds(this.input.managers),
                 name: this.input.name || ''
             }
             this.nameBuffer = this.input.name
@@ -188,6 +189,11 @@ export default defineComponent({
         }
     },
     methods: {
+        normalizeNumericIds(values) {
+            return Array.isArray(values)
+                ? values.map(value => Number(value)).filter(value => Number.isFinite(value))
+                : []
+        },
         filterOptions($event) {
             this.nameBuffer = $event.target.value
             const value = $event.target.value.toLowerCase()
@@ -201,12 +207,12 @@ export default defineComponent({
             this.showDropdown = false
         },
         getPipelineStages(pipelineId) {
-            return this.fieldConfig.stagesByPipeline?.[pipelineId] || []
+            return this.fieldConfig.stagesByPipeline?.[Number(pipelineId)] || []
         },
         updatePipelineStages(pipelineId, statuses) {
             this.fieldConfig.stagesByPipeline = {
                 ...(this.fieldConfig.stagesByPipeline || {}),
-                [pipelineId]: Array.isArray(statuses) ? statuses.map(Number) : []
+                [Number(pipelineId)]: this.normalizeNumericIds(statuses)
             }
         }
     }
