@@ -112,11 +112,8 @@ export default defineComponent({
     },
     computed: {
         selectedPipelineOptions() {
-            const selectedIds = this.normalizeNumericIds(this.fieldConfig.pipelines)
-            return selectedIds.map(id => {
-                const option = this.pipelineOptions.find(item => Number(item.value) === Number(id))
-                return option || { value: Number(id), label: `Воронка #${id}` }
-            })
+            const selectedIds = new Set(this.normalizeNumericIds(this.fieldConfig.pipelines))
+            return this.pipelineOptions.filter(option => selectedIds.has(Number(option.value)))
         }
     },
     watch: {
@@ -173,6 +170,24 @@ export default defineComponent({
             this.nameBuffer = this.input.name
         }
 
+        try {
+            const response = await fetch(window.location.origin + '/api/v4/leads/pipelines')
+            const jsonResponse = await response.json()
+            this.pipelineOptions = jsonResponse._embedded.pipelines.map(pipeline => ({
+                label: pipeline.name,
+                value: Number(pipeline.id)
+            }))
+
+            this.pipelineStageOptions = jsonResponse._embedded.pipelines.reduce((acc, pipeline) => {
+                acc[pipeline.id] = (pipeline._embedded?.statuses || []).map(status => ({
+                    label: status.name,
+                    value: Number(status.id)
+                }))
+                return acc
+            }, {})
+        } catch (error) {
+        }
+
         await this.loadPipelinesAndStages()
     },
     methods: {
@@ -180,57 +195,6 @@ export default defineComponent({
             return Array.isArray(values)
                 ? values.map(value => Number(value)).filter(value => Number.isFinite(value))
                 : []
-        },
-        async loadPipelinesAndStages() {
-            try {
-                const response = await fetch(window.location.origin + '/api/v4/leads/pipelines')
-                if (!response.ok) {
-                    throw new Error('Не удалось получить список воронок')
-                }
-
-                const jsonResponse = await response.json()
-                const pipelines = jsonResponse?._embedded?.pipelines || []
-
-                this.pipelineOptions = pipelines.map(pipeline => ({
-                    label: pipeline.name,
-                    value: Number(pipeline.id)
-                }))
-
-                const stagesFromEmbedded = pipelines.reduce((acc, pipeline) => {
-                    const statuses = (pipeline._embedded?.statuses || []).map(status => ({
-                        label: status.name,
-                        value: Number(status.id)
-                    }))
-                    if (statuses.length) {
-                        acc[Number(pipeline.id)] = statuses
-                    }
-                    return acc
-                }, {})
-
-                this.pipelineStageOptions = stagesFromEmbedded
-
-                await Promise.all(this.pipelineOptions.map(async pipeline => {
-                    const pipelineId = Number(pipeline.value)
-                    if (Array.isArray(this.pipelineStageOptions[pipelineId]) && this.pipelineStageOptions[pipelineId].length) {
-                        return
-                    }
-
-                    try {
-                        const statusesResponse = await fetch(`${window.location.origin}/api/v4/leads/pipelines/${pipelineId}/statuses`)
-                        if (!statusesResponse.ok) {
-                            return
-                        }
-                        const statusesJson = await statusesResponse.json()
-                        const statuses = statusesJson?._embedded?.statuses || []
-                        this.pipelineStageOptions[pipelineId] = statuses.map(status => ({
-                            label: status.name,
-                            value: Number(status.id)
-                        }))
-                    } catch (error) {
-                    }
-                }))
-            } catch (error) {
-            }
         },
         filterOptions($event) {
             this.nameBuffer = $event.target.value
