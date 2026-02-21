@@ -55,7 +55,7 @@
                 </div>
             </template>
 
-            <p>Выберите менеджеро для которых хотите скрыть поля:</p>
+            <p>Выберите менеджеров для которых хотите скрыть поля:</p>
             <a-select class="select_width" v-model:value="fieldConfig.managers" :options="userOptions" mode="multiple"
                 optionFilterProp="label" showSearch>
                 <template #option="{ label, avatar }">

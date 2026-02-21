@@ -73,6 +73,10 @@ export default class Widget {
                 const parsed = Number(raw)
                 statusId = Number.isFinite(parsed) ? parsed : null
             }
+
+            const raw = node.value ?? node.getAttribute('value') ?? node.dataset.value
+            const parsed = Number(raw)
+            return Number.isFinite(parsed) ? parsed : null
         }
 
         let pipelineId = readNumericValue('input[name="PIPELINE_ID"]')
