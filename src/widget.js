@@ -73,6 +73,10 @@ export default class Widget {
                 const parsed = Number(raw)
                 statusId = Number.isFinite(parsed) ? parsed : null
             }
+
+            const raw = node.value ?? node.getAttribute('value') ?? node.dataset.value
+            const parsed = Number(raw)
+            return Number.isFinite(parsed) ? parsed : null
         }
 
         let pipelineId = readNumericValue('input[name="PIPELINE_ID"]')
@@ -97,17 +101,9 @@ export default class Widget {
 
     resetAllManagedFields() {
         this.managedFieldTitles.forEach(fieldName => {
-            const labels = document.querySelectorAll(`.linked-form__field__label[title="${fieldName}"]`)
-            labels.forEach(label => {
-                const fieldContainer = label.closest('.linked-form__field')
-                    || label.closest('.card-cf-field')
-                    || label.parentElement
-
-                if (fieldContainer) {
-                    fieldContainer.style.display = ''
-                }
-
-                label.style.display = ''
+            const fields = document.querySelectorAll(`.linked-form__field__label[title="${fieldName}"]`)
+            fields.forEach(field => {
+                field.style.display = ''
             })
         })
     }
@@ -138,18 +134,9 @@ export default class Widget {
                 return
             }
 
-            const labels = document.querySelectorAll(`.linked-form__field__label[title="${setting.name}"]`)
-            labels.forEach(label => {
-                const fieldContainer = label.closest('.linked-form__field')
-                    || label.closest('.card-cf-field')
-                    || label.parentElement
-
-                if (fieldContainer) {
-                    fieldContainer.style.display = 'none'
-                    return
-                }
-
-                label.style.display = 'none'
+            const fields = document.querySelectorAll(`.linked-form__field__label[title="${setting.name}"]`)
+            fields.forEach(field => {
+                field.style.display = 'none'
             })
         })
     }
