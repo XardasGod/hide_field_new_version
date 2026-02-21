@@ -1,59 +1,182 @@
 import { renderPhoneInput } from './phoneMask'
+
+const STAGE_DEBOUNCE_MS = 150
+
 export default class Widget {
     constructor(amoWidget) {
         this.amoWidget = amoWidget
-        this.cardObserver = null;
-
+        this.cardObserver = null
+        this.stageObserver = null
+        this.recalcTimer = null
+        this.managedFieldTitles = new Set()
     }
-    async customizeFields() {
+
+    parseSettings() {
         let settings = this.amoWidget.get_settings().fieldsConfig
+        if (!settings) {
+            return []
+        }
+
+        if (typeof settings === 'string') {
+            try {
+                const parsed = JSON.parse(settings)
+                settings = Array.isArray(parsed) ? parsed : Object.values(parsed)
+            } catch (error) {
+                console.error('Ошибка парсинга настроек hide_fields:', error)
+                return []
+            }
+        }
+
+        if (!Array.isArray(settings)) {
+            settings = Object.values(settings)
+        }
+
+        return settings
+            .filter(setting => setting && setting.name)
+            .map(setting => ({
+                ...setting,
+                pipelines: Array.isArray(setting.pipelines) ? setting.pipelines.map(Number) : [],
+                managers: Array.isArray(setting.managers) ? setting.managers.map(Number) : [],
+                stagesByPipeline: setting.stagesByPipeline && typeof setting.stagesByPipeline === 'object'
+                    ? Object.fromEntries(Object.entries(setting.stagesByPipeline).map(([pipelineId, statuses]) => [
+                        Number(pipelineId),
+                        Array.isArray(statuses) ? statuses.map(Number) : []
+                    ]))
+                    : {}
+            }))
+    }
+
+    getCurrentLeadContextFromDOM() {
+        const readNumericValue = selector => {
+            const node = document.querySelector(selector)
+            if (!node) {
+                return null
+            }
+
+            const raw = node.value ?? node.getAttribute('value') ?? node.dataset.value
+            const parsed = Number(raw)
+            return Number.isFinite(parsed) ? parsed : null
+        }
+
+        let statusId = readNumericValue('input[name="STATUS"]')
+            ?? readNumericValue('input[name="status_id"]')
+            ?? readNumericValue('input[name="lead[STATUS]"]')
+            ?? readNumericValue('[name="STATUS_ID"]')
+
+        if (statusId === null) {
+            const selectedOption = document.querySelector(
+                '[data-field-code="STATUS"] [data-id], [data-field-code="STATUS"] [data-value], .control--select--list--item.selected'
+            )
+
+            if (selectedOption) {
+                const raw = selectedOption.dataset.id ?? selectedOption.dataset.value ?? selectedOption.getAttribute('data-id')
+                const parsed = Number(raw)
+                statusId = Number.isFinite(parsed) ? parsed : null
+            }
+        }
+
+        let pipelineId = readNumericValue('input[name="PIPELINE_ID"]')
+            ?? readNumericValue('input[name="pipeline_id"]')
+            ?? readNumericValue('input[name="lead[PIPELINE_ID]"]')
+
+        if (pipelineId === null) {
+            const statusField = document.querySelector('[data-field-code="STATUS"]')
+            if (statusField) {
+                const raw = statusField.dataset.pipelineId ?? statusField.getAttribute('data-pipeline-id')
+                const parsed = Number(raw)
+                pipelineId = Number.isFinite(parsed) ? parsed : null
+            }
+        }
+
+        if (pipelineId === null || statusId === null) {
+            return null
+        }
+
+        return { pipelineId, statusId }
+    }
+
+    resetAllManagedFields() {
+        this.managedFieldTitles.forEach(fieldName => {
+            const labels = document.querySelectorAll(`.linked-form__field__label[title="${fieldName}"]`)
+            labels.forEach(label => {
+                const fieldContainer = label.closest('.linked-form__field')
+                    || label.closest('.card-cf-field')
+                    || label.parentElement
+
+                if (fieldContainer) {
+                    fieldContainer.style.display = ''
+                }
+
+                label.style.display = ''
+            })
+        })
+    }
+
+    shouldHideField(setting, context) {
+        const userId = Number(APP.constant('user').id)
+
+        if (!setting.managers.includes(userId)) {
+            return false
+        }
+
+        if (!setting.pipelines.includes(context.pipelineId)) {
+            return false
+        }
+
+        const statusesForPipeline = setting.stagesByPipeline[context.pipelineId]
+
+        if (!Array.isArray(statusesForPipeline) || statusesForPipeline.length === 0) {
+            return true
+        }
+
+        return statusesForPipeline.includes(context.statusId)
+    }
+
+    hideMatchedFields(settings, context) {
+        settings.forEach(setting => {
+            if (!this.shouldHideField(setting, context)) {
+                return
+            }
+
+            const labels = document.querySelectorAll(`.linked-form__field__label[title="${setting.name}"]`)
+            labels.forEach(label => {
+                const fieldContainer = label.closest('.linked-form__field')
+                    || label.closest('.card-cf-field')
+                    || label.parentElement
+
+                if (fieldContainer) {
+                    fieldContainer.style.display = 'none'
+                    return
+                }
+
+                label.style.display = 'none'
+            })
+        })
+    }
+
+    async customizeFields() {
         const paymentStatus = localStorage.getItem('crm82_hide_fields')
-        if (APP.getWidgetsArea() === "leads_card" && settings && paymentStatus !== 'pay_me') { //если виджет оплачен предоставляем доступ к функционалу виджета, если нет показываем уведомление об оплате
-                if (typeof settings === "string") {//иногда передается нормальный массив иногда строка json, невероятно.
-                    settings = Object.values(JSON.parse(this.amoWidget.get_settings().fieldsConfig))
-                }
-                for (const setting of settings) {
-                    this.customize(setting)
-                }
-            
-        }
-        await this.checkPayment(); //в любом случае проверяем оплату
-    }
-    async customize(setting) {
-        const pipeline_id = await this.getPipelineId();
-        if (setting.pipelines.indexOf(pipeline_id) != -1 && setting.managers.indexOf(APP.constant('user').id) != -1) {
-            const fields = document.querySelectorAll(`.linked-form__field__label[title="${setting.name}"]`);
-            for (const field of fields) {
-                field.style.display = 'none'
 
+        if (APP.getWidgetsArea() === 'leads_card' && paymentStatus !== 'pay_me') {
+            const settings = this.parseSettings()
+            this.managedFieldTitles = new Set(settings.map(setting => setting.name))
+
+            this.resetAllManagedFields()
+
+            const context = this.getCurrentLeadContextFromDOM()
+            if (context) {
+                this.hideMatchedFields(settings, context)
             }
         }
+
+        await this.checkPayment()
     }
 
-
-    // Функция, которая выполняет запрос с использованием fetch и async/await
-    async getPipelineId() {
-        // Получение ID текущей сделки
-        const dealId = window.location.pathname.split('/').pop();
-        try {
-            const response = await fetch(`/api/v4/leads/${dealId}`, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            const pipelineId = data.pipeline_id;
-
-            return pipelineId;
-        } catch (error) {
-            console.error('Ошибка при получении данных о воронке:', error);
-        }
+    scheduleRecalculate() {
+        clearTimeout(this.recalcTimer)
+        this.recalcTimer = setTimeout(() => {
+            this.customizeFields()
+        }, STAGE_DEBOUNCE_MS)
     }
 
     async checkPayment() {
@@ -66,40 +189,37 @@ export default class Widget {
                 body: JSON.stringify({
                     subdomain: APP.constant('account').subdomain
                 })
-            });
+            })
             if (response.status === 200) {
-                localStorage.removeItem("crm82_hide_fields");
+                localStorage.removeItem('crm82_hide_fields')
             }
             else if (response.status === 402) {
                 localStorage.setItem('crm82_hide_fields', 'pay_me')
                 const error_params = {
-                    header: "Скрытие полей CRM82",
-                    text: "Срок действия виджета истек. Перейдите в настройки для оплаты"
-                };
-                AMOCRM.notifications.show_message_error(error_params);
+                    header: 'Скрытие полей CRM82',
+                    text: 'Срок действия виджета истек. Перейдите в настройки для оплаты'
+                }
+                AMOCRM.notifications.show_message_error(error_params)
             }
         } catch (error) {
-            console.error(error); // Log any other errors
+            console.error(error)
         }
     }
 
-    async mountSettings() { //настройки виджета
-        const LoadingDiv = document.createElement('div');
+    async mountSettings() {
+        const LoadingDiv = document.createElement('div')
         LoadingDiv.innerHTML = '<div style="position:absolute; left:0; right:0; top:0; bottom:0; display:flex; justify-content:center; align-items:center; background-color:white; z-index: 999"><span>Загрузка...</span></div>'
         LoadingDiv.id = 'loading_widget'
-        //загрузка
-        const sеttingsDescription = document.querySelector('.widget_settings_block__descr'); //точка монтирования
-        //  const description = document.createElement('div');
+        const sеttingsDescription = document.querySelector('.widget_settings_block__descr')
 
-        sеttingsDescription.innerHTML = ""; //удаление дефолтного описания
-        sеttingsDescription.parentElement.appendChild(LoadingDiv); //установка загрузки
-
+        sеttingsDescription.innerHTML = ''
+        sеttingsDescription.parentElement.appendChild(LoadingDiv)
 
         this.vueApp = await this.createApp(() => import('./components/Settings.vue'))
-        this.vueApp.mount(sеttingsDescription);
+        this.vueApp.mount(sеttingsDescription)
 
         try {
-            const response = await fetch(`https://widgetsfree.crm82.ru/api/widget/hide_fields/access_info`, {
+            const response = await fetch('https://widgetsfree.crm82.ru/api/widget/hide_fields/access_info', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -107,10 +227,10 @@ export default class Widget {
                 body: JSON.stringify({
                     subdomain: APP.constant('account').subdomain
                 })
-            });
+            })
             if (response.status === 401) {
-                sеttingsDescription.removeChild(sеttingsDescription.lastChild); //удаление настроек виджета и рендер формы ввода телефона
-                renderPhoneInput(sеttingsDescription, 'https://widgetsfree.crm82.ru/api/widget/hide_fields/phone');
+                sеttingsDescription.removeChild(sеttingsDescription.lastChild)
+                renderPhoneInput(sеttingsDescription, 'https://widgetsfree.crm82.ru/api/widget/hide_fields/phone')
             }
         } catch (error) {
         }
@@ -129,24 +249,46 @@ export default class Widget {
             mutations.forEach(mutation => {
                 mutation.addedNodes.forEach(node => {
                     if (node.id === 'card_fields') {
-                        this.customizeFields()
+                        this.scheduleRecalculate()
                     }
                     if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('button-input__saved')) {
-                        this.customizeFields()
+                        this.scheduleRecalculate()
                     }
-
-                });
-            });
-        });
+                })
+            })
+        })
         const target = document.querySelector('#card_holder')
-        this.cardObserver.observe(target, { childList: true, subtree: true });
+        if (target) {
+            this.cardObserver.observe(target, { childList: true, subtree: true })
+        }
+
+        this.addStageObserver()
     }
 
-    forRenderFunction() { //обсервер не всегда ставится через init по каким то причинам.
+    addStageObserver() {
+        this.stageObserver && this.stageObserver.disconnect()
+
+        const target = document.querySelector('#card_holder')
+        if (!target) {
+            return
+        }
+
+        this.stageObserver = new MutationObserver(() => {
+            this.scheduleRecalculate()
+        })
+
+        this.stageObserver.observe(target, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['class', 'value', 'data-id', 'data-value', 'data-pipeline-id']
+        })
+    }
+
+    forRenderFunction() {
         if (!this.cardObserver) {
             this.customizeFields()
             this.addCardObserver()
         }
     }
-
 }
