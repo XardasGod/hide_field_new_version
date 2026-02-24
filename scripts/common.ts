@@ -20,7 +20,7 @@ export const config: Config = {
     settings: {
       fieldsConfig: {
         name: 'fieldsConfig',
-        type: 'custom',
+        type: 'text',
         required: false,
       },
     }
