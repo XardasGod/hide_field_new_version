@@ -90,6 +90,10 @@ export default class Widget {
                 const parsed = Number(raw)
                 pipelineId = Number.isFinite(parsed) ? parsed : null
             }
+
+            const raw = node.value ?? node.getAttribute('value') ?? node.dataset.value
+            const parsed = Number(raw)
+            return Number.isFinite(parsed) ? parsed : null
         }
 
         if (pipelineId === null || statusId === null) {
